@@ -1,0 +1,95 @@
+services:
+  router:
+    image: ubuntu:24.04
+    container_name: router
+    cap_add:
+      - NET_ADMIN
+    privileged: true                         # required for iptables
+    networks:
+      WAN:
+        ipv4_address: 192.168.1.81
+        priority: 1000                       # the higher, the larger metrics
+      LAN:
+        ipv4_address: 172.16.100.2
+        priority: 1
+#    command: bash -c "
+#      apt update > /dev/null &&
+#      apt install -y iproute2 iptables bsdmainutils curl traceroute > /dev/null &&
+#      echo 1 > /proc/sys/net/ipv4/ip_forward &&
+#      ip addr &&
+#      iptables -t nat -A POSTROUTING -o eth0 -s 172.16.100.0/24 -j MASQUERADE &&
+#      ip route show table main | column -t &&
+#      traceroute ipinfo.io &&
+#      tail -f /dev/null"
+
+#   this is equivalent to using 'command: bash -c " ... "'. It is more intuitive, BUT cannot add comment between the quotes.
+    command:
+      - bash
+      - -c
+      - |
+          apt update > /dev/null &&           # make the installation slient
+          apt install -y iproute2 iptables bsdmainutils curl traceroute > /dev/null &&
+          echo 1 > /proc/sys/net/ipv4/ip_forward &&
+          ip addr &&
+          iptables -t nat -A POSTROUTING -o eth0 -s 172.16.100.0/24 -j MASQUERADE &&  # route LAN (eth1) to WAN (eth0)
+          ip route show table main | column -t &&
+          traceroute ipinfo.io &&
+          tail -f /dev/null
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://ipinfo.io"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+  client:
+    depends_on:
+      router:                                 # make sure all router resources, config, cmd are completed before running client
+        condition: service_healthy
+    image: developercyrus/docker-ipinfo:latest
+    container_name: client
+    cap_add:
+      - NET_ADMIN
+    networks:
+      LAN:
+        ipv4_address: 172.16.100.51
+#    command: bash -c "
+#      ip route del default via 172.16.100.1 &&
+#      ip route add default via 172.16.100.2 && 
+#      ip route show table main | column -t &&
+#      ip addr &&
+#      ping -c 4 172.16.100.2 &&
+#      traceroute ipinfo.io &&
+#      tail -f /dev/null"
+
+#   this is equivalent to using 'command: bash -c " ... "'. It is more intuitive, BUT cannot add comment between the quotes.
+    command:
+      - bash
+      - -c
+      - |
+          ip route del default via 172.16.100.1 && # remove default gateway of external bridge
+          ip route add default via 172.16.100.2 && # add back the gateway of router 
+          ip route show table main | column -t &&
+          ip addr &&
+          ping -c 4 172.16.100.2 &&
+          traceroute ipinfo.io &&
+          tail -f /dev/null
+
+networks:
+  WAN:
+    name: eth0                                 # make sure WAN is assigned by eth0, because creation sequence inside the container is by alphabetical order: eth0, eth1, ...
+    driver: macvlan
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.1
+    driver_opts:
+      parent: ens18                            # this is the host's primary interface, make sure WAN is routed through host's LAN
+  LAN:
+    name: eth1
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.16.100.0/24
+#    internal: true                            # initially I want to use internal bridge, simulating no traffic can be routed to external.
+                                               # however, if true, this is the host level iptables preventing the traffic leave 
+                                               # the bridge, and "ip route add default" will cause error
