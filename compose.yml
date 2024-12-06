@@ -41,12 +41,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
-  client:
+  client1:
     depends_on:
       router:                                 # make sure all router resources, config, cmd are completed before running client
         condition: service_healthy
     image: developercyrus/docker-ipinfo:latest
-    container_name: client
+    container_name: client1
     cap_add:
       - NET_ADMIN
     networks:
@@ -58,6 +58,7 @@ services:
 #      ip route show table main | column -t &&
 #      ip addr &&
 #      ping -c 4 172.16.100.2 &&
+#      ping -c 4 192.168.1.151 && 
 #      traceroute ipinfo.io &&
 #      tail -f /dev/null"
 
@@ -71,7 +72,40 @@ services:
           ip route show table main | column -t &&
           ip addr &&
           ping -c 4 172.16.100.2 &&
+          ping -c 4 192.168.1.151 &&               # take caution: the neighborhoods of router are also accessed by the machine under NAT. 
           traceroute ipinfo.io &&
+          tail -f /dev/null
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://ipinfo.io"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+  client2:
+    depends_on:
+      client1:
+        condition: service_healthy
+    image: developercyrus/docker-ipinfo:latest
+    container_name: client2
+    cap_add:
+      - NET_ADMIN
+    networks:
+      WAN:
+        ipv4_address: 192.168.1.82
+#    command: bash -c " 
+#      ip route show table main | column -t &&
+#      ip addr &&
+#      ping -c 4 172.16.100.51 &&
+#      tail -f /dev/null"
+
+#   this is equivalent to using 'command: bash -c " ... "'. It is more intuitive, BUT cannot add comment between >
+    command:
+      - bash
+      - -c
+      - |
+          ip route show table main | column -t &&
+          ip addr &&
+          ping -c 4 172.16.100.51 &&           # client1 is protected under NAT, where client2 cannot access to. 
           tail -f /dev/null
 
 networks:
